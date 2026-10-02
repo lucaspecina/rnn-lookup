@@ -45,7 +45,7 @@ case "${1:-status}" in
     ;;
   sync)
     rsync -az --delete \
-      --exclude '.git' --exclude '.venv' --exclude 'results/' --exclude 'data/' --exclude '__pycache__' \
+      --exclude '.git' --exclude '/.venv' --exclude '/results/' --exclude '/data/' --exclude '__pycache__' \
       -e "ssh -o StrictHostKeyChecking=accept-new" \
       ./ "$USER@$(ip):$REMOTE_DIR/"
     echo "Repo copiado a $VM:$REMOTE_DIR"

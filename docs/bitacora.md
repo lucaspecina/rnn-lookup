@@ -4,6 +4,86 @@ Qué hicimos, qué encontramos y qué decidimos, con fecha. Lo más nuevo arriba
 Cada entrada: qué pasó, por qué, y qué cambia. La explicación general del
 proyecto está en `guia.md`; los detalles crudos, en `notas/`.
 
+## 2026-10-02 (noche): resultados del banco v1
+
+**Terminó el banco v1**: 120 corridas, 0 fallas, 1 h 53 min de pared en la VM
+(~$5). Tablero: https://claude.ai/artifact/Rz9CzaL6CPzr7HxNjWJptT. Tabla
+completa en `results/bench_v1/scorecard.md` (ignorado por git; se regenera).
+
+**El banco está calibrado: muestra las diferencias conocidas, y una sorpresa.**
+
+1. *Recuerdo exacto (MQAR).* Atención 100% en todo, en una época, incluso con
+   secuencias 4× más largas que las de entrenamiento. Gated DeltaNet se cae
+   donde se le llena la hoja: con estado de 17 KB (d64) perfecto hasta 32 pares,
+   45% con 128 y 13% con 256; con 67 KB (d128) aguanta hasta 128 y da 92% con
+   256; con 265 KB (d256), 96%. La ventana de 64 se cae apenas los pares no le
+   entran (57% con 32, 0 después). Exactamente la curva de Zoology.
+2. *Actualización (la clave cambia de valor, vale el último).* **La atención se
+   queda en 75-78% en todas las dificultades y Gated DeltaNet le gana**
+   (d256: 100% hasta 64 pares, 91% con 128). El 75% tiene explicación exacta:
+   la mitad de las claves se actualizan; esta atención no tiene posiciones
+   explícitas (solo la conv corta), así que para una clave actualizada ve dos
+   valores y no sabe cuál fue el último: acierta las no actualizadas (50%) y
+   adivina en las otras (25%). La RNN pisa lo viejo al escribir. Es parte
+   configuración (un Transformer con posiciones lo resolvería) y parte
+   mecanismo. Primer juego donde la hoja gana.
+3. *Claves compuestas.* Misma foto que MQAR pero más duro para la RNN
+   (d128: 84% con 144 pares; d64: 36%). Atención 100% en 2 épocas.
+4. *Paridad acumulada.* Atención en el azar (50%) en todos los largos, como
+   predice la teoría. Gated DeltaNet normal también falla (67% en 64, azar en
+   256). **La variante con autovalores negativos (beta en (0,2)) da 100% en 64,
+   128 y 256, y 97% en 512: ocho veces el largo de entrenamiento.** Es la
+   replicación limpia de arXiv:2411.12537 y la primera "perilla de
+   arquitectura" que el banco distingue: un cambio de una línea pasa de azar a
+   perfecto.
+5. *Mayoría acumulada.* Fácil para todos (97-99% en 512) salvo las ventanas,
+   que no pueden contar más allá de lo que ven (62-72% en 512).
+
+**Costo real por corrida.** Suma de minutos de entrenamiento de las 40 mejores
+corridas: 441. Las de Gated DeltaNet en MQAR son las caras (26-34 min cada una
+con 12 corridas compartiendo las GPUs); paridad y mayoría, 1-3 min.
+
+**Lanzados los juegos de abstracción** (`rules` y `arc1d`, 48 corridas) a las
+16:27 hora VM. `arc1d` se examina también con las 860 instancias reales de
+1D-ARC que entran en 288 tokens.
+
+## 2026-10-02 (tarde): primera sesión en la VM
+
+**Entorno en la VM, listo.** 2×H100 NVL (94 GB cada una), driver 580, torch 2.11
+cu128, fla 0.5.2. El disco del sistema estaba al 98% (otros proyectos: anaconda,
+caches de HF y pip); se limpiaron solo caches (pip, apt) y el entorno + cache de
+datos van al disco temporal de Azure (/mnt, 256 GB, efímero). `setup_vm.sh` lo
+regenera en ~5 minutos si la VM se desaloja.
+
+**Dos bugs que había que encontrar antes de medir nada.**
+1. `fla` 0.5 quitó el argumento `head_first` que usaba el wrapper de Gated DeltaNet
+   de Zoology. Arreglado en el fork.
+2. El Triton que trae torch (3.6) da resultados incorrectos en Hopper en la pasada
+   hacia atrás de Gated DeltaNet (fla issue #640); fla directamente se niega a
+   correr. Se fija `triton>=3.7.1` en `setup_vm.sh`.
+Con eso, la prueba de plomería del banco (40 corridas chicas, 5 juegos, 8
+arquitecturas) pasó completa: 0 fallas.
+
+**Primeras mediciones de tiempo (MQAR tamaño completo, 1 época, 180K secuencias).**
+
+| Arquitectura | seg/época | accuracy tras 1 época |
+|---|---|---|
+| atención d128 | 11 | 1.000 (ya resuelve todo, hasta 1024 tokens / 256 pares) |
+| ventana w64 d128 | 11 | 0.514 |
+| Gated DeltaNet d128 | 92 | 0.934 |
+| Gated DeltaNet d256 | 70 | 0.988 |
+
+Gated DeltaNet es ~8× más lento por época que atención a esta escala (kernels
+Triton con heads chicas; la GPU está lejos de saturarse por corrida). Por eso se
+corren 6 corridas por GPU en paralelo.
+
+**Banco v1 lanzado** a las 14:33 en tmux (`results/bench_v1/launch.log`): 120
+corridas, 12 en paralelo. Estimación previa: 2 a 3 horas, ~$8.
+
+**Detalle de serialización.** Pydantic serializa los segmentos de datos como la
+clase base y pierde `num_kv_pairs` y compañía; el `config.json` de cada corrida
+ahora se guarda con `serialize_as_any=True` para ser reproducible.
+
 ## 2026-10-02
 
 **De un experimento a un banco de pruebas.** Lucas marcó que MQAR solo mide lo

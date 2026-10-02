@@ -6,12 +6,16 @@ Juegos (todos ya implementados en Zoology; solo elegimos las perillas):
   compositional_mqar    claves compuestas: el valor depende de DOS tokens de clave
   cumulative_parity     seguimiento de estado: paridad acumulada de una tira de bits
   cumulative_majority   conteo: mayoría acumulada de una tira de bits
+  rules                 mini-ARC: inducir una regla nueva de K ejemplos en contexto y aplicarla;
+                        examen con composiciones y primitivas nunca vistas
+  arc1d                 mini-ARC con fondo y objetos (catálogo de 1D-ARC); examen con reglas
+                        nunca vistas y con las instancias reales del dataset 1D-ARC
 En todos, el examen incluye secuencias más largas que las de entrenamiento
 (generalización de largo). La tarjeta de puntajes la arma rnn_lookup.scorecard.
 
 Arquitecturas: atención (d 64, 128), ventana (d 128; w 16, 64),
 Gated DeltaNet (d 64, 128, 256) y su variante con autovalores negativos (d 128).
-3 learning rates. 8 x 3 x 5 = 120 corridas.
+3 learning rates. 8 x 3 x 7 = 168 corridas.
 
 Variables de entorno:
   BENCH_GAMES=mqar,cumulative_parity   correr solo algunos juegos
@@ -27,6 +31,8 @@ from zoology.data.multiquery_ar import MQARConfig
 from zoology.data.forgetting_mqar import ForgettingMQARConfig
 from zoology.data.compositional_mqar import CompositionalMQARConfig
 from zoology.data.circuits import CumulativeParityConfig, CumulativeMajorityConfig
+from rnn_lookup.games.rules import RulesConfig
+from rnn_lookup.games.arc1d import Arc1DConfig
 from rnn_lookup.zoo import attention, sliding_window, gated_delta_net, gated_delta_net_neg, VOCAB_SIZE
 
 SMOKE = os.environ.get("BENCH_SMOKE") == "1"
@@ -36,6 +42,13 @@ N_TEST = 200 if SMOKE else 1_000
 MAX_EPOCHS = 2 if SMOKE else 32
 LRS = [1e-3] if SMOKE else [float(x) for x in np.logspace(-3, -2, 3)]  # 1e-3, 3.2e-3, 1e-2
 BIT_VOCAB = 16  # paridad y mayoría usan solo los tokens 0 y 1
+RULES_VOCAB, RULES_L = 16, 96  # 8 símbolos + 3 especiales; largo para K=5 ejemplos de tiras de 6
+RULES_PRIMS = ["reverse", "rot1", "rot2", "sort", "incr", "decr", "first_to_all"]  # mirror_half queda afuera
+RULES_HELD_OUT = [("reverse", "rot1"), ("sort", "incr"), ("rot2", "decr")]
+ARC_L = 288  # K=3 ejemplos con filas de hasta 33 píxeles (cubre 860 de las 901 instancias reales)
+ARC_SEEN = ["move", "fill", "hollow", "flip", "recolor_size", "denoise", "recolor_parity"]
+ARC_UNSEEN = ["pattern_copy", "scale"]
+OUTPUT_DIR = "results/bench_v1_smoke" if SMOKE else "results/bench_v1"
 
 
 def mqar(L, kv, n):
@@ -48,6 +61,15 @@ def fmqar(L, kv, upd, n):
 
 def cmqar(L, kv, n):
     return CompositionalMQARConfig(vocab_size=VOCAB_SIZE, input_seq_len=L, num_kv_pairs=kv, num_examples=n)
+
+
+def arc(n, split, **kw):
+    return Arc1DConfig(vocab_size=16, input_seq_len=ARC_L, num_examples=n, split=split, **kw)
+
+
+def rule(n, depth, split, demos=3, **kw):
+    return RulesConfig(vocab_size=RULES_VOCAB, input_seq_len=RULES_L, num_symbols=8, str_len=6, num_demos=demos,
+                       num_examples=n, depth=depth, split=split, **kw)
 
 
 GAMES = {
@@ -83,6 +105,25 @@ GAMES = {
         slices=["input_seq_len"],
         train=[CumulativeMajorityConfig(vocab_size=BIT_VOCAB, input_seq_len=64, num_examples=N_TRAIN)],
         test=[CumulativeMajorityConfig(vocab_size=BIT_VOCAB, input_seq_len=L, num_examples=N_TEST) for L in (64, 128, 256, 512)],
+    ),
+    "rules": dict(
+        vocab=RULES_VOCAB,
+        slices=["split", "depth"],
+        train=[rule(N_TRAIN_BIG if not SMOKE else N_TRAIN, 1, "seen", primitives=RULES_PRIMS),
+               rule(N_TRAIN_BIG if not SMOKE else N_TRAIN, 2, "seen", primitives=RULES_PRIMS, exclude=RULES_HELD_OUT)],
+        test=[rule(N_TEST, 1, "seen", primitives=RULES_PRIMS),
+              rule(N_TEST, 2, "seen", primitives=RULES_PRIMS, exclude=RULES_HELD_OUT),
+              rule(N_TEST, 2, "unseen_comp", compositions=RULES_HELD_OUT),
+              rule(N_TEST, 1, "unseen_prim", compositions=[("mirror_half",)]),
+              rule(N_TEST, 1, "seen_5demos", demos=5, primitives=RULES_PRIMS)],
+    ),
+    "arc1d": dict(
+        vocab=16,
+        slices=["split"],
+        train=[arc(N_TRAIN_BIG if not SMOKE else N_TRAIN, "seen", rules=ARC_SEEN)],
+        test=[arc(N_TEST, "seen", rules=ARC_SEEN),
+              arc(N_TEST, "unseen_rule", rules=ARC_UNSEEN),
+              arc(10_000, "1darc_real", source="1darc")],
     ),
 }
 
@@ -120,6 +161,6 @@ for game, g in GAMES.items():
                     slice_keys=g["slices"],
                     sweep_id=game,
                     run_id=f"{model.name}-d{model.d_model}-lr{lr:.1e}",
-                    output_dir="results/bench_v1",
+                    output_dir=OUTPUT_DIR,
                 )
             )

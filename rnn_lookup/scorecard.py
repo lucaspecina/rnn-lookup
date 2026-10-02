@@ -57,12 +57,19 @@ def scorecard(bank_dir: Path) -> pd.DataFrame:
     return df.loc[idx].sort_values(["game", "arch"]).reset_index(drop=True)
 
 
+def _num_or_str(v: str):
+    try:
+        return (0, float(v))
+    except ValueError:
+        return (1, v)
+
+
 def to_markdown(df: pd.DataFrame) -> str:
     out = []
     for game, g in df.groupby("game", sort=True):
         slice_cols = sorted(
             [c for c in g.columns if c.startswith("valid/") and c != "valid/accuracy" and c != "valid/loss" and g[c].notna().any()],
-            key=lambda c: (c.rsplit("-", 1)[0], float(c.rsplit("-", 1)[1])),
+            key=lambda c: (c.rsplit("-", 1)[0], _num_or_str(c.rsplit("-", 1)[1])),
         )
         cols = ["arch", "valid/accuracy"] + slice_cols + ["state_bytes", "params", "lr", "epochs", "minutes"]
         t = g[cols].copy()

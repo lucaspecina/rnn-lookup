@@ -10,6 +10,32 @@ decidimos, con fecha. Este explica; aquel registra.
 
 ---
 
+## 0. Lo que buscamos de fondo
+
+Antes del problema concreto, el norte. Lo que a Lucas le interesa probar son
+sistemas que **abstraigan conceptos** y que esas abstracciones sirvan para
+cosas nuevas: estrategias generales para adaptarse y resolver lo que nunca
+vieron, en la línea de la filosofía de ARC-AGI. Y que **aprender algo nuevo no
+borre lo anterior**, como les pasa a las redes de hoy.
+
+La idea de este proyecto (una hoja de apuntes de tamaño fijo más la capacidad
+de ir a consultar el contexto) es un vehículo para eso, con un encuadre que
+conviene tener presente: la hoja debería guardar **abstracciones** (reglas,
+conceptos) y el libro, los **casos concretos**. Consultar el libro es traer
+instancias; lo que queda en la hoja es la regla.
+
+El banco de pruebas de hoy (§6) mide memoria. Dos de sus juegos tocan la
+abstracción de refilón: generalizar a secuencias más largas que las de
+entrenamiento (aplicar la misma regla a algo nunca visto) y las claves
+compuestas. Pero todavía no mide las dos cosas de arriba. Las dos se pueden
+armar en miniatura, y van a entrar en la versión siguiente:
+
+1. **Inducir una regla desde pocos ejemplos y aplicarla**: juegos donde el
+   "diccionario" cambia en cada secuencia, así que memorizar no sirve y hay que
+   abstraer. Zoology ya trae una variante así.
+2. **Aprender B sin borrar A**: no es un juego sino un protocolo. Entrenar en A,
+   después en B, y volver a medir A.
+
 ## 1. El problema
 
 Un modelo de lenguaje lee texto y, más adelante, tiene que usar lo que leyó:
@@ -316,16 +342,19 @@ No inventamos ni el dataset, ni la tarea, ni las evaluaciones. Existen:
 
 ## 9. Dónde estamos y qué sigue
 
-**Hecho.** El repo armado, el fork de Zoology con el cambio de logging, la VM
-identificada, y una prueba de humo local que confirma que el circuito completo
-(config → entrenamiento → archivos de resultados) funciona.
+**Hecho.** El repo, el fork de Zoology, la VM y el tablero. El banco v1 corrió
+completo (120 corridas, 0 fallas, 2 horas, ~$5) y quedó **calibrado**: muestra
+las diferencias conocidas. Atención perfecta en recuerdo exacto; Gated DeltaNet
+se cae donde se le llena la hoja, y más tarde cuanto más grande la hoja; las
+ventanas se caen cuando los pares no entran. Y dos hallazgos propios: en el
+juego de actualización la RNN le gana a la atención (que sin posiciones
+explícitas no sabe cuál valor fue el último), y en paridad la variante de
+Gated DeltaNet con autovalores negativos pasa de azar a 100%, generalizando a
+8 veces el largo de entrenamiento, mientras atención y la variante normal se
+quedan en el azar. Detalle en la bitácora.
 
-**Ahora.** Calibrar el banco con los baselines: 120 corridas (atención, ventana,
-Gated DeltaNet y una variante, en varios tamaños y learning rates) sobre los
-cinco juegos. Esperamos ver que atención gana en recuerdo exacto, que la ventana
-se cae cuando los pares no entran, y dónde queda cada uno en paridad, mayoría y
-largo. Si la tarjeta no muestra esas diferencias conocidas, el banco está mal
-armado. De paso medimos cuánto tarda una corrida de verdad.
+**Ahora.** Corren los dos juegos de abstracción (reglas en contexto y mini-ARC
+con objetos, 48 corridas), con el examen de instancias reales de 1D-ARC.
 
 **Después.** Diseñar el mecanismo de consulta y meterlo como una variante más en
 el mismo barrido. Las preguntas de diseño abiertas, en orden de importancia:
