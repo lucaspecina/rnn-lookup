@@ -1,0 +1,4 @@
+[submodule "third_party/zoology"]
+	path = third_party/zoology
+	url = https://github.com/lucaspecina/zoology.git
+	branch = rnn-lookup
